@@ -37,6 +37,7 @@
 #include <__utility/move.h>
 #include <__utility/pair.h>
 #include <new>
+#include <type_traits> // was here
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -607,19 +608,31 @@ _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 _Iter2 __uninitialized_alloc
     _Alloc& __alloc, _Iter1 __first1, _Sent1 __last1, _Iter2 __first2) {
   static_assert(__is_cpp17_move_insertable<_Alloc>::value,
                 "The specified type does not meet the requirements of Cpp17MoveInsertable");
-  auto __destruct_first = __first2;
-  auto __guard =
+  using __iter_value_t = typename std::iterator_traits<_Iter1>::value_type;
+  if constexpr(std::__is_default_allocator<_Alloc>::value
+            && std::is_nothrow_destructible<__iter_value_t>::value
+            && std::is_nothrow_move_constructible<__iter_value_t>::value) {
+    while (__first1 != __last1) {
+      allocator_traits<_Alloc>::construct(__alloc, std::__to_address(__first2), std::move(*__first1));
+      allocator_traits<_Alloc>::destroy(__alloc, std::__to_address(__first1));
+      ++__first1;
+      ++__first2;
+    }
+  } else {
+    auto __destruct_first = __first2;
+    auto __guard =
       std::__make_exception_guard(_AllocatorDestroyRangeReverse<_Alloc, _Iter2>(__alloc, __destruct_first, __first2));
-  while (__first1 != __last1) {
+    while (__first1 != __last1) {
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
-    allocator_traits<_Alloc>::construct(__alloc, std::__to_address(__first2), std::move_if_noexcept(*__first1));
+      allocator_traits<_Alloc>::construct(__alloc, std::__to_address(__first2), std::move_if_noexcept(*__first1));
 #else
-    allocator_traits<_Alloc>::construct(__alloc, std::__to_address(__first2), std::move(*__first1));
+      allocator_traits<_Alloc>::construct(__alloc, std::__to_address(__first2), std::move(*__first1));
 #endif
-    ++__first1;
-    ++__first2;
+      ++__first1;
+      ++__first2;
+    }
+    __guard.__complete();
   }
-  __guard.__complete();
   return __first2;
 }
 
